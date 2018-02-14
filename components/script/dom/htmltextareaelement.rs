@@ -308,6 +308,7 @@ impl HTMLTextAreaElementMethods for HTMLTextAreaElement {
 impl HTMLTextAreaElement {
     pub fn reset(&self,  update_text_cursor: bool) {
         // https://html.spec.whatwg.org/multipage/#the-textarea-element:concept-form-reset-control
+
         self.update_text_contents(self.DefaultValue(), update_text_cursor);
         self.value_dirty.set(false);
     }
