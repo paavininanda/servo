@@ -1,0 +1,23 @@
+<!doctype html>
+
+<form>
+<input value="test"></input>
+<textarea>test</textarea>
+</form>
+
+<script>
+  for (el of document.querySelectorAll("input, textarea")) {
+    console.log(`${el.tagName} selection: (${el.selectionStart}, ${el.selectionEnd})`);
+    el.value = "a";
+  }
+
+  for (el of document.querySelectorAll("input, textarea")) {
+    console.log(`${el.tagName} selection after value change: (${el.selectionStart}, ${el.selectionEnd})`);
+  }
+
+  document.querySelector("form").reset();
+
+  for (el of document.querySelectorAll("input, textarea")) {
+    console.log(`${el.tagName} selection after reset: (${el.selectionStart}, ${el.selectionEnd})`);
+  }
+</script>
