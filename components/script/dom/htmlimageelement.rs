@@ -12,6 +12,7 @@ use dom::bindings::codegen::Bindings::ElementBinding::ElementBinding::ElementMet
 use dom::bindings::codegen::Bindings::HTMLImageElementBinding;
 use dom::bindings::codegen::Bindings::HTMLImageElementBinding::HTMLImageElementMethods;
 use dom::bindings::codegen::Bindings::MouseEventBinding::MouseEventMethods;
+use dom::bindings::codegen::Bindings::NodeBinding::NodeBinding::NodeMethods;
 use dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
 use dom::bindings::error::Fallible;
 use dom::bindings::inheritance::Castable;
@@ -28,6 +29,7 @@ use dom::htmlareaelement::HTMLAreaElement;
 use dom::htmlelement::HTMLElement;
 use dom::htmlformelement::{FormControl, HTMLFormElement};
 use dom::htmlmapelement::HTMLMapElement;
+use dom::htmlpictureelement::HTMLPictureElement;
 use dom::mouseevent::MouseEvent;
 use dom::node::{Node, NodeDamage, document_from_node, window_from_node};
 use dom::progressevent::ProgressEvent;
@@ -55,8 +57,12 @@ use std::cell::{Cell, RefMut};
 use std::char;
 use std::default::Default;
 use std::i32;
+use std::ptr::null;
 use std::sync::{Arc, Mutex};
-use style::attr::{AttrValue, LengthOrPercentageOrAuto, parse_double, parse_unsigned_integer};
+use style::attr::{AttrValue, LengthOrPercentageOrAuto, parse_double, parse_length, parse_unsigned_integer};
+use style::context::QuirksMode;
+use style::media_queries::MediaQuery;
+use style::parser::ParserContext;
 use style::str::is_ascii_digit;
 use task_source::{TaskSource, TaskSourceName};
 
@@ -358,12 +364,46 @@ impl HTMLImageElement {
     /// <https://html.spec.whatwg.org/multipage/#update-the-source-set>
     fn update_source_set(&self) -> Vec<DOMString> {
         let elem = self.upcast::<Element>();
-        // TODO: follow the algorithm
+        // Step 1
+        elem.set_attribute(&local_name!("src"), AttrValue::String("".to_string()));
+
+        println!("{:?}",elem.get_string_attribute(&local_name!("src")));
+
+        // Step 2
+        let parent = elem.upcast::<Node>().GetParentElement();
+        let is_parent_picture = match parent.clone() {
+            Some(xparent) => xparent.is::<HTMLPictureElement>(),
+            None => false
+        };
+        println!("{:?}", is_parent_picture );
+        let nodes = parent.unwrap().upcast::<Node>().ChildNodes();
+        let elements = match is_parent_picture {
+            true => nodes.iter().map(|n| DomRoot::from_ref(&*(*n).downcast::<Element>().unwrap())).collect(),
+            false => vec![DomRoot::from_ref(&*elem)],
+        };
+
+
+        // Step 3
+        let width = match elem.get_attribute(&ns!(), &local_name!("width")) {
+            Some(x) => { match parse_length(&x.value()) {
+                LengthOrPercentageOrAuto::Length(x) => x,
+                _ => null
+                }
+            },
+            None => null
+        };
+
+
+
         let src = elem.get_string_attribute(&local_name!("src"));
         if src.is_empty() {
             return vec![]
         }
         vec![src]
+    }
+
+    fn normalise_source_densities(&mut self) {
+
     }
 
     /// <https://html.spec.whatwg.org/multipage/#select-an-image-source>
