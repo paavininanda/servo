@@ -57,7 +57,6 @@ use std::cell::{Cell, RefMut};
 use std::char;
 use std::default::Default;
 use std::i32;
-use std::ptr::null;
 use std::sync::{Arc, Mutex};
 use style::attr::{AttrValue, LengthOrPercentageOrAuto, parse_double, parse_length, parse_unsigned_integer};
 use style::context::QuirksMode;
@@ -70,6 +69,11 @@ enum ParseState {
     InDescriptor,
     InParens,
     AfterDescriptor,
+}
+
+pub struct SourceSet {
+    pub imageSources: Vec<ImageSource>,
+    pub sourceSize: Vec<Size>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -363,10 +367,15 @@ impl HTMLImageElement {
 
     /// <https://html.spec.whatwg.org/multipage/#update-the-source-set>
     fn update_source_set(&self) -> Vec<DOMString> {
-        let elem = self.upcast::<Element>();
-        // Step 1
-        elem.set_attribute(&local_name!("src"), AttrValue::String("".to_string()));
 
+        // Step 1
+        let mut source_set = SourceSet {
+            imageSources: Vec::<ImageSource>::new(),
+            sourceSize : Vec::<Size>::new(),
+        };
+
+        // elem.set_attribute(&local_name!("src"), AttrValue::String("".to_string()));
+        let elem = self.upcast::<Element>();
         println!("{:?}",elem.get_string_attribute(&local_name!("src")));
 
         // Step 2
@@ -386,12 +395,42 @@ impl HTMLImageElement {
         // Step 3
         let width = match elem.get_attribute(&ns!(), &local_name!("width")) {
             Some(x) => { match parse_length(&x.value()) {
-                LengthOrPercentageOrAuto::Length(x) => x,
-                _ => null
+                LengthOrPercentageOrAuto::Length(x) => Some(x.to_px() as u32),
+                _ => None
                 }
             },
-            None => null
+            None => None
         };
+
+        // Step 4
+        elements.iter().map(|element| {
+            // Step 4.1
+            if *element==DomRoot::from_ref(&*elem){
+                // Step 4.1.1
+                match element.get_attribute(&ns!(), &local_name!("srcset")) {
+                    Some(x) => {
+                        source_set.imageSources = parse_a_srcset_attribute(&x.value()) ;
+                    }
+                    _ => ()
+                }
+
+                // Step 4.1.2
+                match element.get_attribute(&ns!(), &local_name!("sizes")) {
+                    Some(x) => {
+                        source_set.sourceSize =
+                            parse_a_sizes_attribute( DOMString::from_string(x.value().to_string()), width);
+                    }
+                    _ => ()
+                }
+
+                // Step 4.1.3
+
+            }
+            // Step 4.2
+            else {
+
+            }
+        });
 
 
 
