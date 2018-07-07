@@ -30,6 +30,7 @@ use dom::htmlelement::HTMLElement;
 use dom::htmlformelement::{FormControl, HTMLFormElement};
 use dom::htmlmapelement::HTMLMapElement;
 use dom::htmlpictureelement::HTMLPictureElement;
+use dom::htmlsourceelement::HTMLSourceElement;
 use dom::mouseevent::MouseEvent;
 use dom::node::{Node, NodeDamage, document_from_node, window_from_node};
 use dom::progressevent::ProgressEvent;
@@ -403,13 +404,13 @@ impl HTMLImageElement {
         };
 
         // Step 4
-        elements.iter().map(|element| {
+        for element in &elements {
             // Step 4.1
-            if *element==DomRoot::from_ref(&*elem){
+            if *element == DomRoot::from_ref(&*elem) {
                 // Step 4.1.1
                 match element.get_attribute(&ns!(), &local_name!("srcset")) {
                     Some(x) => {
-                        source_set.imageSources = parse_a_srcset_attribute(&x.value()) ;
+                        source_set.imageSources = parse_a_srcset_attribute(&x.value());
                     }
                     _ => ()
                 }
@@ -418,7 +419,7 @@ impl HTMLImageElement {
                 match element.get_attribute(&ns!(), &local_name!("sizes")) {
                     Some(x) => {
                         source_set.sourceSize =
-                            parse_a_sizes_attribute( DOMString::from_string(x.value().to_string()), width);
+                            parse_a_sizes_attribute(DOMString::from_string(x.value().to_string()), width);
                     }
                     _ => ()
                 }
@@ -436,25 +437,82 @@ impl HTMLImageElement {
                         Some(_x) => true,
                         _ => false
                     }
-                ).count() == 0 ;
+                ).count() == 0;
                 if !is_str_empty && den_img_src_not_found && wid_img_src_not_found {
-                    source_set.imageSources.push(ImageSource{
+                    source_set.imageSources.push(ImageSource {
                         url: element.get_string_attribute(&local_name!("src")).to_string(),
-                        descriptor: Descriptor{ wid:None, den: None}
+                        descriptor: Descriptor { wid: None, den: None }
                     })
                 }
 
                 // Step 4.1.4
                 Self::normalise_source_densities(&mut source_set);
 
+                // Step 4.1.5
+                // Set source_set as the source set ? How to parse it to string ?
 
+                // Step 4.1.6
+                return vec![];
+            } else {
+                // Step 4.2
+                if element.is::<HTMLSourceElement>() {
+                    continue;
+                } else {
+                    // Step 4.3 - 4.4
+                    match element.get_attribute(&ns!(), &local_name!("srcset")) {
+                        Some(x) => {
+                            source_set.imageSources = parse_a_srcset_attribute(&x.value());
+                        }
+                        _ => continue
+                    }
+
+                    // Step 4.5
+                    if source_set.imageSources.len() == 0 {
+                        continue;
+                    }
+
+                    // Step 4.6
+                    match element.get_attribute(&ns!(), &local_name!("media")) {
+                        Some(x) => {
+                            // Check if value of the attribute matches the environment
+                            if *(&x.value().trim().is_empty()) {
+                                // TODO check for media query spec with a or condition
+                            }
+                            else{
+                                continue;
+                            }
+                        }
+                        _ => ()
+                    }
+
+                    // Step 4.7
+                    match element.get_attribute(&ns!(), &local_name!("sizes")) {
+                        Some(x) => {
+                            source_set.sourceSize =
+                                parse_a_sizes_attribute(DOMString::from_string(x.value().to_string()), width);
+                        }
+                        _ => ()
+                    }
+
+                    // Step 4.8
+                    match element.get_attribute(&ns!(), &local_name!("type")) {
+                        Some(x) => {
+                            // If unsupported mime type TODO
+                            continue;
+                        }
+                        _ => ()
+                    }
+
+                    // Step 4.9
+                    Self::normalise_source_densities(&mut source_set);
+
+                    // Step 4.10
+                    // Set source_set as the source set ? How to parse it to string ?
+
+                    return vec![];
+                }
             }
-            // Step 4.2
-            else {
-
-            }
-        });
-
+        }
 
 
         let src = elem.get_string_attribute(&local_name!("src"));
@@ -468,19 +526,19 @@ impl HTMLImageElement {
     /// <https://html.spec.whatwg.org/multipage/images.html#normalise-the-source-densities>
     fn normalise_source_densities(source_set: &mut SourceSet) {
         let source_size = &source_set.sourceSize;
-        source_set.imageSources.iter_mut().map(|imgsource| {
+        for imgsource in &mut source_set.imageSources {
             if  imgsource.descriptor.den.is_some(){
-                // Continue
-                ()
+                continue;
             }
             else {
                 if imgsource.descriptor.wid.is_some() {
+                    // TODO source_size.len() is wrong maybe (which value to take out of all the values ? )
                     imgsource.descriptor.den = Some((imgsource.descriptor.wid.unwrap() / source_size.len() as u32).into());
                 } else {
                     imgsource.descriptor.den = Some(1 as f64);
                 }
             }
-        });
+        };
     }
 
     /// <https://html.spec.whatwg.org/multipage/#select-an-image-source>
