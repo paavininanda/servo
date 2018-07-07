@@ -424,6 +424,29 @@ impl HTMLImageElement {
                 }
 
                 // Step 4.1.3
+                let is_str_empty = element.get_string_attribute(&local_name!("src")) == DOMString::from_string("".to_string());
+                let den_img_src_not_found = source_set.imageSources.iter().filter(|imgsource|
+                    match imgsource.descriptor.den {
+                        Some(x) => (x == (1 as f64)),
+                        _ => false
+                    }
+                ).count() == 0;
+                let wid_img_src_not_found = source_set.imageSources.iter().filter(|imgsource|
+                    match imgsource.descriptor.wid {
+                        Some(_x) => true,
+                        _ => false
+                    }
+                ).count() == 0 ;
+                if !is_str_empty && den_img_src_not_found && wid_img_src_not_found {
+                    source_set.imageSources.push(ImageSource{
+                        url: element.get_string_attribute(&local_name!("src")).to_string(),
+                        descriptor: Descriptor{ wid:None, den: None}
+                    })
+                }
+
+                // Step 4.1.4
+                Self::normalise_source_densities(&mut source_set);
+
 
             }
             // Step 4.2
@@ -441,8 +464,23 @@ impl HTMLImageElement {
         vec![src]
     }
 
-    fn normalise_source_densities(&mut self) {
 
+    /// <https://html.spec.whatwg.org/multipage/images.html#normalise-the-source-densities>
+    fn normalise_source_densities(source_set: &mut SourceSet) {
+        let source_size = &source_set.sourceSize;
+        source_set.imageSources.iter_mut().map(|imgsource| {
+            if  imgsource.descriptor.den.is_some(){
+                // Continue
+                ()
+            }
+            else {
+                if imgsource.descriptor.wid.is_some() {
+                    imgsource.descriptor.den = Some((imgsource.descriptor.wid.unwrap() / source_size.len() as u32).into());
+                } else {
+                    imgsource.descriptor.den = Some(1 as f64);
+                }
+            }
+        });
     }
 
     /// <https://html.spec.whatwg.org/multipage/#select-an-image-source>
