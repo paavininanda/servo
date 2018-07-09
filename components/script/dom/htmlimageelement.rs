@@ -43,6 +43,7 @@ use html5ever::{LocalName, Prefix};
 use ipc_channel::ipc;
 use ipc_channel::router::ROUTER;
 use microtask::{Microtask, MicrotaskRunnable};
+use mime_guess::get_mime_type_str;
 use net_traits::{FetchResponseListener, FetchMetadata, NetworkError, FetchResponseMsg};
 use net_traits::image::base::{Image, ImageMetadata};
 use net_traits::image_cache::{CanRequestImages, ImageCache, ImageOrMetadataAvailable};
@@ -497,10 +498,12 @@ impl HTMLImageElement {
                     // Step 4.8
                     match element.get_attribute(&ns!(), &local_name!("type")) {
                         Some(x) => {
-                            // If unsupported mime type TODO
-                            continue;
+                            match get_mime_type_str(&x.value()) {
+                                Some(_valid_mime) => (),
+                                None => continue // Unsupported mime type
+                            }
                         }
-                        _ => ()
+                        _ => () // Unknown mime type
                     }
 
                     // Step 4.9
