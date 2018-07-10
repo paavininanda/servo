@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use app_units::{Au, AU_PER_PX};
+use cssparser::{Parser, ParserInput};
 use document_loader::{LoadType, LoadBlocker};
 use dom::activation::Activatable;
 use dom::attr::Attr;
@@ -63,9 +64,14 @@ use std::sync::{Arc, Mutex};
 use style::attr::{AttrValue, LengthOrPercentageOrAuto, parse_double, parse_length, parse_unsigned_integer};
 use style::context::QuirksMode;
 use style::media_queries::MediaQuery;
+use style::media_queries::MediaCondition;
 use style::parser::ParserContext;
 use style::str::is_ascii_digit;
+use style::values::specified::{Length, source_size_list::SourceSizeList};
+use style::stylesheets::{CssRuleType, Origin};
+use style_traits::ParsingMode;
 use task_source::{TaskSource, TaskSourceName};
+
 
 enum ParseState {
     InDescriptor,
@@ -75,7 +81,7 @@ enum ParseState {
 
 pub struct SourceSet {
     pub imageSources: Vec<ImageSource>,
-    pub sourceSize: Vec<Size>,
+    pub sourceSize: SourceSizeList,
 }
 
 #[derive(Debug, PartialEq)]
@@ -97,6 +103,12 @@ enum State {
     PartiallyAvailable,
     CompletelyAvailable,
     Broken,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Size {
+    pub query: Option<MediaQuery>,
+    pub length: Length,
 }
 
 #[derive(Clone, Copy, JSTraceable, MallocSizeOf)]
@@ -373,7 +385,7 @@ impl HTMLImageElement {
         // Step 1
         let mut source_set = SourceSet {
             imageSources: Vec::<ImageSource>::new(),
-            sourceSize : Vec::<Size>::new(),
+            sourceSize : SourceSizeList::empty(),
         };
 
         // elem.set_attribute(&local_name!("src"), AttrValue::String("".to_string()));
@@ -399,7 +411,7 @@ impl HTMLImageElement {
             Some(x) => { match parse_length(&x.value()) {
                 LengthOrPercentageOrAuto::Length(x) => Some(x.to_px() as u32),
                 _ => None
-                }
+            }
             },
             None => None
         };
@@ -476,8 +488,8 @@ impl HTMLImageElement {
                     match element.get_attribute(&ns!(), &local_name!("media")) {
                         Some(x) => {
                             // Check if value of the attribute matches the environment
-                            if *(&x.value().trim().is_empty()) {
-                                // TODO check for media query spec with a or condition
+                            if *(&x.value().trim().is_empty()) || Self::matches_environment(&self, x.value().to_string()){
+                                ()
                             }
                             else{
                                 continue;
@@ -503,7 +515,7 @@ impl HTMLImageElement {
                                 None => continue // Unsupported mime type
                             }
                         }
-                        _ => () // Unknown mime type
+                        _ => continue // Unknown mime type
                     }
 
                     // Step 4.9
@@ -525,7 +537,6 @@ impl HTMLImageElement {
         vec![src]
     }
 
-
     /// <https://html.spec.whatwg.org/multipage/images.html#normalise-the-source-densities>
     fn normalise_source_densities(source_set: &mut SourceSet) {
         let source_size = &source_set.sourceSize;
@@ -533,15 +544,47 @@ impl HTMLImageElement {
             if  imgsource.descriptor.den.is_some(){
                 continue;
             }
-            else {
-                if imgsource.descriptor.wid.is_some() {
-                    // TODO source_size.len() is wrong maybe (which value to take out of all the values ? )
-                    imgsource.descriptor.den = Some((imgsource.descriptor.wid.unwrap() / source_size.len() as u32).into());
-                } else {
-                    imgsource.descriptor.den = Some(1 as f64);
+                else {
+                    if imgsource.descriptor.wid.is_some() {
+                        // TODO source_size.len() is wrong maybe (which value to take out of all the values ? )
+                        // imgsource.descriptor.den = Some((imgsource.descriptor.wid.unwrap() / source_size.len() as u32).into());
+                    } else {
+                        imgsource.descriptor.den = Some(1 as f64);
+                    }
                 }
-            }
         };
+    }
+
+    /// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#matches-the-environment
+    fn matches_environment(&self, media_query: String) -> bool {
+        let document = document_from_node(self);
+        let device = document.device().unwrap();
+        let quirks_mode = document.quirks_mode();
+        let document_url = &document.url();
+        let context = ParserContext::new(
+            Origin::Author,
+            document_url,
+            Some(CssRuleType::Style),
+            ParsingMode::all(),
+            quirks_mode,
+            None,
+        );
+        let mut parserInput = ParserInput::new(&media_query);
+        let mut parser = Parser::new(&mut parserInput);
+        let condition = MediaCondition::parse(&context, &mut parser);
+
+        let result = match condition {
+            Ok(x) => x.matches(&device, quirks_mode),
+            _ => false,
+        };
+
+
+
+        if *(&media_query.trim().is_empty()) || result {
+            true
+        } else {
+            false
+        }
     }
 
     /// <https://html.spec.whatwg.org/multipage/#select-an-image-source>
@@ -670,7 +713,7 @@ impl HTMLImageElement {
         let parsed_url = base_url.join(&src);
         match parsed_url {
             Ok(url) => {
-                    // Step 12
+                // Step 12
                 self.prepare_image_request(&url, &src);
             },
             Err(_) => {
@@ -840,9 +883,9 @@ impl HTMLImageElement {
         }
 
         let useMapElements = document_from_node(self).upcast::<Node>()
-                                .traverse_preorder()
-                                .filter_map(DomRoot::downcast::<HTMLMapElement>)
-                                .find(|n| n.upcast::<Element>().get_string_attribute(&LocalName::from("name")) == last);
+            .traverse_preorder()
+            .filter_map(DomRoot::downcast::<HTMLMapElement>)
+            .find(|n| n.upcast::<Element>().get_string_attribute(&LocalName::from("name")) == last);
 
         useMapElements.map(|mapElem| mapElem.get_area_elements())
     }
@@ -921,6 +964,22 @@ impl LayoutHTMLImageElementHelpers for LayoutDom<HTMLImageElement> {
                 .unwrap_or(LengthOrPercentageOrAuto::Auto)
         }
     }
+}
+
+//https://html.spec.whatwg.org/multipage/#parse-a-sizes-attribute   
+pub fn parse_a_sizes_attribute(value: DOMString, _width: Option<u32>) -> SourceSizeList {
+    let mut input = ParserInput::new(&value);
+    let mut parser = Parser::new(&mut input);
+    let url = ServoUrl::parse("about:blank").unwrap();
+    let context = ParserContext::new(
+        Origin::Author,
+        &url,
+        Some(CssRuleType::Style),
+        ParsingMode::empty(),
+        QuirksMode::NoQuirks,
+        None,
+    );
+    SourceSizeList::parse(&context, &mut parser)
 }
 
 impl HTMLImageElementMethods for HTMLImageElement {
@@ -1100,35 +1159,35 @@ impl VirtualMethods for HTMLImageElement {
             return
         }
 
-       let area_elements = self.areas();
-       let elements = match area_elements {
-           Some(x) => x,
-           None => return,
-       };
+        let area_elements = self.areas();
+        let elements = match area_elements {
+            Some(x) => x,
+            None => return,
+        };
 
-       // Fetch click coordinates
-       let mouse_event = match event.downcast::<MouseEvent>() {
-           Some(x) => x,
-           None => return,
-       };
+        // Fetch click coordinates
+        let mouse_event = match event.downcast::<MouseEvent>() {
+            Some(x) => x,
+            None => return,
+        };
 
-       let point = Point2D::new(mouse_event.ClientX().to_f32().unwrap(),
-                                mouse_event.ClientY().to_f32().unwrap());
-       let bcr = self.upcast::<Element>().GetBoundingClientRect();
-       let bcr_p = Point2D::new(bcr.X() as f32, bcr.Y() as f32);
+        let point = Point2D::new(mouse_event.ClientX().to_f32().unwrap(),
+                                 mouse_event.ClientY().to_f32().unwrap());
+        let bcr = self.upcast::<Element>().GetBoundingClientRect();
+        let bcr_p = Point2D::new(bcr.X() as f32, bcr.Y() as f32);
 
-       // Walk HTMLAreaElements
-       for element in elements {
-           let shape = element.get_shape_from_coords();
-           let shp = match shape {
-               Some(x) => x.absolute_coords(bcr_p),
-               None => return,
-           };
-           if shp.hit_test(&point) {
-               element.activation_behavior(event, self.upcast());
-               return
-           }
-       }
+        // Walk HTMLAreaElements
+        for element in elements {
+            let shape = element.get_shape_from_coords();
+            let shp = match shape {
+                Some(x) => x.absolute_coords(bcr_p),
+                None => return,
+            };
+            if shp.hit_test(&point) {
+                element.activation_behavior(event, self.upcast());
+                return
+            }
+        }
     }
 }
 
