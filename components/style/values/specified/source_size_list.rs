@@ -40,7 +40,10 @@ impl Parse for SourceSize {
 /// https://html.spec.whatwg.org/multipage/#source-size-list
 pub struct SourceSizeList {
     source_sizes: Vec<SourceSize>,
-    value: Option<Length>,
+    /// A value for a `<source-size-list>`:
+    ///
+    /// https://html.spec.whatwg.org/multipage/#source-size-list
+    pub value: Option<Length>,
 }
 
 impl SourceSizeList {

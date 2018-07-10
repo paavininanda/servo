@@ -67,6 +67,7 @@ use style::media_queries::MediaQuery;
 use style::media_queries::MediaCondition;
 use style::parser::ParserContext;
 use style::str::is_ascii_digit;
+use style::values::generics::transform::ToAbsoluteLength;
 use style::values::specified::{Length, source_size_list::SourceSizeList};
 use style::stylesheets::{CssRuleType, Origin};
 use style_traits::ParsingMode;
@@ -459,7 +460,7 @@ impl HTMLImageElement {
                 }
 
                 // Step 4.1.4
-                Self::normalise_source_densities(&mut source_set);
+                Self::normalise_source_densities(&self, &mut source_set);
 
                 // Step 4.1.5
                 // Set source_set as the source set ? How to parse it to string ?
@@ -519,7 +520,7 @@ impl HTMLImageElement {
                     }
 
                     // Step 4.9
-                    Self::normalise_source_densities(&mut source_set);
+                    Self::normalise_source_densities(&self, &mut source_set);
 
                     // Step 4.10
                     // Set source_set as the source set ? How to parse it to string ?
@@ -538,16 +539,24 @@ impl HTMLImageElement {
     }
 
     /// <https://html.spec.whatwg.org/multipage/images.html#normalise-the-source-densities>
-    fn normalise_source_densities(source_set: &mut SourceSet) {
+    fn normalise_source_densities(&self, source_set: &mut SourceSet) {
+        let document = document_from_node(self);
+        let device = document.device().unwrap();
+        let quirks_mode = document.quirks_mode();
         let source_size = &source_set.sourceSize;
+//        let vwLength = Some(source_size.evaluate(&device, quirks_mode));
+        let source_size_length_result = source_size.value.unwrap().to_pixel_length(Some(Au::new(1 as i32)));
         for imgsource in &mut source_set.imageSources {
             if  imgsource.descriptor.den.is_some(){
                 continue;
             }
                 else {
                     if imgsource.descriptor.wid.is_some() {
-                        // TODO source_size.len() is wrong maybe (which value to take out of all the values ? )
-                        // imgsource.descriptor.den = Some((imgsource.descriptor.wid.unwrap() / source_size.len() as u32).into());
+                        let source_size_length = match source_size_length_result {
+                            Ok(x) => x,
+                            _ => 1 as f32,
+                        };
+                         imgsource.descriptor.den = Some((imgsource.descriptor.wid.unwrap() / source_size_length as u32).into());
                     } else {
                         imgsource.descriptor.den = Some(1 as f64);
                     }
