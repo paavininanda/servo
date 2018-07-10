@@ -544,15 +544,15 @@ impl HTMLImageElement {
         let device = document.device().unwrap();
         let quirks_mode = document.quirks_mode();
         let source_size = &source_set.sourceSize;
-//        let vwLength = Some(source_size.evaluate(&device, quirks_mode));
-        let source_size_length_result = source_size.value.unwrap().to_pixel_length(Some(Au::new(1 as i32)));
+        let vwLength = Some(source_size.evaluate(&device, quirks_mode));
+        let source_size_length_result = &source_set.sourceSize.value.clone().unwrap().to_pixel_length(vwLength);
         for imgsource in &mut source_set.imageSources {
             if  imgsource.descriptor.den.is_some(){
                 continue;
             }
                 else {
                     if imgsource.descriptor.wid.is_some() {
-                        let source_size_length = match source_size_length_result {
+                        let source_size_length = match *source_size_length_result {
                             Ok(x) => x,
                             _ => 1 as f32,
                         };
