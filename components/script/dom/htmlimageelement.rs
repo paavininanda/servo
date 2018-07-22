@@ -577,7 +577,7 @@ impl HTMLImageElement {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#select-an-image-source>
-    fn select_image_source(&self) -> Option<(DOMString, f32)> {
+    fn select_image_source(&self) -> Option<(DOMString, f64)> {
         // Step 1, 3
         self.update_source_set();
         let source_set = &*self.source_set.borrow_mut();
@@ -610,9 +610,20 @@ impl HTMLImageElement {
             }
         }
 
-        // TODO Step 5 - select source based on pixel density
-        let selected_source = img_sources.remove(0).clone();
-        Some((DOMString::from_string(selected_source.url), selected_source.descriptor.den.unwrap() as f32))
+        // Step 5
+        let mut best_candidate = max;
+        let device = document_from_node(self).device();
+        if let Some(device) = device {
+            let device_den = device.device_pixel_ratio().get() as f64;
+            for (index, image_source) in img_sources.iter().enumerate() {
+                let current_den = image_source.descriptor.den.unwrap();
+                if current_den < best_candidate.0 && current_den >= device_den {
+                    best_candidate = (current_den, index);
+                }
+            }
+        }
+        let selected_source = img_sources.remove(best_candidate.1).clone();
+        Some((DOMString::from_string(selected_source.url), selected_source.descriptor.den.unwrap() as f64))
     }
 
     fn init_image_request(&self,
@@ -680,7 +691,7 @@ impl HTMLImageElement {
         let this = Trusted::new(self);
         let src = match self.select_image_source() {
             Some(src) => {
-                // Step 8.
+                // Step 8
                 // TODO: Handle pixel density.
                 src.0
             },
@@ -838,6 +849,75 @@ impl HTMLImageElement {
         ScriptThread::await_stable_state(Microtask::ImageElement(task));
     }
 
+    /// <https://html.spec.whatwg.org/multipage/images.html#img-environment-changes>
+    fn react_to_environment_changes(&self){
+        // Step 1
+        let task = ImageElementMicrotask::EnvironmentChangesTask {
+            elem: DomRoot::from_ref(self),
+        };
+        ScriptThread::await_stable_state(Microtask::ImageElement(task));
+
+    }
+
+    /// Step 3- of https://html.spec.whatwg.org/multipage/images.html#img-environment-changes
+    fn react_to_environment_changes_sync_steps(&self){
+        let mut selected_source = None;
+        let mut selected_pixel_density = None;
+        let elem = self.upcast::<Element>();
+        let document = document_from_node(elem);
+        let base_url = document.base_url();
+        match self.select_image_source() {
+            Some(src) => {
+                // Step 3
+                selected_source = Some(src.0);
+                selected_pixel_density = Some(src.1);
+            },
+            _ => ()
+        }
+
+        // Step 4
+        let src = match selected_source {
+            Some(src) => src,
+            _ => return,
+        };
+
+        // Step 5
+        let same_source = match *self.last_selected_source.borrow() {
+            Some(ref last_src) => last_src == src,
+            _ => false,
+        };
+//
+//            match selected_source {
+//
+//            Some(src) => self.last_selected_source.borrow_mut().map_or(false, |source| source == src),
+//            _ => false,
+//        };
+
+        let same_selected_pixel_density = match selected_pixel_density {
+            Some(den) => self.current_request.borrow().current_pixel_density.map_or(false,|density| density==den),
+            _ => self.current_request.borrow().current_pixel_density.map_or(true, |den| false),
+        };
+
+        if same_source && same_selected_pixel_density {
+            return;
+        }
+
+        // Step 6
+        if let Ok(img_url) = base_url.join(&String::from(src)) {
+
+            // Step 7
+            let corsAttributeState = self.GetCrossOrigin();
+
+            // Step 8
+            let origin = document.origin().immutable().clone();
+
+            // Step 10
+        }
+        return;
+
+
+    }
+
     fn new_inherited(local_name: LocalName, prefix: Option<Prefix>, document: &Document) -> HTMLImageElement {
         HTMLImageElement {
             htmlelement: HTMLElement::new_inherited(local_name, prefix, document),
@@ -927,6 +1007,9 @@ pub enum ImageElementMicrotask {
     StableStateUpdateImageDataTask {
         elem: DomRoot<HTMLImageElement>,
         generation: u32,
+    },
+    EnvironmentChangesTask {
+        elem: DomRoot<HTMLImageElement>,
     }
 }
 
@@ -938,6 +1021,21 @@ impl MicrotaskRunnable for ImageElementMicrotask {
                 // stop here if other instances of this algorithm have been scheduled
                 if elem.generation.get() == *generation {
                     elem.update_the_image_data_sync_steps();
+                }
+            },
+            &ImageElementMicrotask::EnvironmentChangesTask { ref elem } => {
+                // TODO: Handle multipart/x-mixed-replace
+                // Step 2 of https://html.spec.whatwg.org/multipage/images.html#img-environment-changes,
+                let element = elem.upcast::<Element>();
+                let has_src = element.has_attribute(&local_name!("srcset"));
+                let document = document_from_node(element);
+                let has_pending_request =  match elem.image_request.get() {
+                    ImageRequestPhase::Pending => true,
+                    _ => false
+                };
+
+                if document.is_active() && has_src && !has_pending_request {
+                    elem.react_to_environment_changes_sync_steps();
                 }
             },
         }
