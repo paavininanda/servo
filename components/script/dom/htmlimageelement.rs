@@ -106,7 +106,7 @@ pub struct Descriptor {
     pub den: Option<f64>,
 }
 
-#[derive(Clone, Copy, JSTraceable, MallocSizeOf)]
+#[derive(Clone, Copy, Debug, JSTraceable, MallocSizeOf)]
 #[allow(dead_code)]
 enum State {
     Unavailable,
@@ -233,6 +233,9 @@ impl HTMLImageElement {
                         if generation == element.generation.get() {
                             element.process_image_response(image);
                         }
+                        else {
+                            println!("Generation not equal {:?} {:?}", generation, element.generation.get());
+                        }
                     }),
                     &task_canceller,
                 );
@@ -247,6 +250,7 @@ impl HTMLImageElement {
             image_cache.find_image_or_metadata(img_url.clone().into(),
                                                UsePlaceholder::Yes,
                                                CanRequestImages::Yes);
+        println!("Fetch Image Response type = {:?}", response);
         match response {
             Ok(ImageOrMetadataAvailable::ImageAvailable(image, url)) => {
                 self.process_image_response(ImageResponse::Loaded(image, url));
@@ -306,6 +310,7 @@ impl HTMLImageElement {
     /// Step 14 of https://html.spec.whatwg.org/multipage/#update-the-image-data
     fn process_image_response(&self, image: ImageResponse) {
         // TODO: Handle multipart/x-mixed-replace
+        println!("Inside Step14");
         let (trigger_image_load, trigger_image_error) = match (image, self.image_request.get()) {
             (ImageResponse::Loaded(image, url), ImageRequestPhase::Current) |
             (ImageResponse::PlaceholderLoaded(image, url), ImageRequestPhase::Current) => {
@@ -339,11 +344,11 @@ impl HTMLImageElement {
             (ImageResponse::MetadataLoaded(meta), ImageRequestPhase::Current) => {
                 self.current_request.borrow_mut().state = State::PartiallyAvailable;
                 self.current_request.borrow_mut().metadata = Some(meta);
-                (false, false)
+                (true, false)
             },
             (ImageResponse::MetadataLoaded(_), ImageRequestPhase::Pending) => {
                 self.pending_request.borrow_mut().state = State::PartiallyAvailable;
-                (false, false)
+                (true, false)
             },
             (ImageResponse::None, ImageRequestPhase::Current) => {
                 self.abort_request(State::Broken, ImageRequestPhase::Current);
@@ -359,6 +364,7 @@ impl HTMLImageElement {
 
         // Fire image.onload and loadend
         if trigger_image_load {
+            println!("Onload time");
             // TODO: https://html.spec.whatwg.org/multipage/#fire-a-progress-event-or-event
             self.upcast::<EventTarget>().fire_event(atom!("load"));
             self.upcast::<EventTarget>().fire_event(atom!("loadend"));
@@ -366,6 +372,7 @@ impl HTMLImageElement {
 
         // Fire image.onerror
         if trigger_image_error {
+            println!("Error time");
             self.upcast::<EventTarget>().fire_event(atom!("error"));
             self.upcast::<EventTarget>().fire_event(atom!("loadend"));
         }
@@ -373,6 +380,7 @@ impl HTMLImageElement {
         // Trigger reflow
         let window = window_from_node(self);
         window.add_pending_reflow();
+        println!("Update image data finished");
     }
 
     /// <https://html.spec.whatwg.org/multipage/#abort-the-image-request>
@@ -792,6 +800,7 @@ impl HTMLImageElement {
         let elem = self.upcast::<Element>();
         let src = elem.get_string_attribute(&local_name!("src"));
         let base_url = document.base_url();
+        println!("Update_image_data called");
 
         // https://html.spec.whatwg.org/multipage/#reacting-to-dom-mutations
         // Always first set the current request to unavailable,
@@ -869,6 +878,7 @@ impl HTMLImageElement {
             generation: self.generation.get(),
         };
         ScriptThread::await_stable_state(Microtask::ImageElement(task));
+        println!("Update the image data finished");
     }
 
     fn new_inherited(local_name: LocalName, prefix: Option<Prefix>, document: &Document) -> HTMLImageElement {
@@ -968,6 +978,7 @@ pub enum ImageElementMicrotask {
 
 impl MicrotaskRunnable for ImageElementMicrotask {
     fn handler(&self) {
+        println!("Handler");
         match self {
             &ImageElementMicrotask::StableStateUpdateImageDataTask { ref elem, ref generation } => {
                 // Step 7 of https://html.spec.whatwg.org/multipage/#update-the-image-data,
@@ -1142,9 +1153,9 @@ impl HTMLImageElementMethods for HTMLImageElement {
 
     // https://html.spec.whatwg.org/multipage/#dom-img-currentsrc
     fn CurrentSrc(&self) -> DOMString {
-        let ref url = self.current_request.borrow().source_url;
+        let ref url = self.current_request.borrow().parsed_url;
         match *url {
-            Some(ref url) => url.clone(),
+            Some(ref url) => DOMString::from_string(url.clone().into_string()),
             None => DOMString::from(""),
         }
     }
@@ -1196,11 +1207,28 @@ impl VirtualMethods for HTMLImageElement {
         self.update_the_image_data();
     }
 
+    fn bind_to_tree(&self, tree_in_doc: bool) {
+        if let Some(ref s) = self.super_type() {
+            s.bind_to_tree(tree_in_doc);
+        }
+        if let Some(parent) = self.upcast::<Node>().GetParentElement() {
+            if parent.is::<HTMLPictureElement>() {
+                self.update_the_image_data();
+            }
+        }
+    }
+
     fn attribute_mutated(&self, attr: &Attr, mutation: AttributeMutation) {
         self.super_type().unwrap().attribute_mutated(attr, mutation);
         match attr.local_name() {
             &local_name!("src") => self.update_the_image_data(),
+            &local_name!("srcset") => self.update_the_image_data(),
             _ => {},
+        }
+        if let Some(parent) = self.upcast::<Node>().GetParentElement() {
+            if parent.is::<HTMLPictureElement>() {
+                self.update_the_image_data();
+            }
         }
     }
 
